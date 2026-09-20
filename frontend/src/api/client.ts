@@ -1,4 +1,4 @@
-import type { Dashboard } from '@/types/bank';
+import type { Dashboard, PaperResult } from '@/types/bank';
 
 const API_BASE = '/api';
 
@@ -21,10 +21,11 @@ export const api = {
   health: () => request<{ status: string; service: string }>('/health/'),
   dashboard: () => request<Dashboard>('/dashboard/'),
   generatePaper: (difficulty: string, amount: number) =>
-    request<{ paper: Dashboard['paper'] }>('/papers/generate/', {
+    request<PaperResult>('/papers/generate/', {
       method: 'POST',
       body: JSON.stringify({ difficulty, amount })
     }),
+  latestPaper: () => request<PaperResult | { paper: null }>('/papers/latest/'),
   submitExam: (answers: Record<number, string>) =>
     request<{ score: number; rank_hint: string; analysis: string[] }>('/exams/submit/', {
       method: 'POST',

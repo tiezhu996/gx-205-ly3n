@@ -9,7 +9,10 @@ const { Content } = Layout;
 const { Title, Paragraph, Text } = Typography;
 
 function App() {
-  const { dashboard, loading, error, loadDashboard, demoLogin } = useBankStore();
+  const {
+    dashboard, loading, error, loadDashboard, demoLogin,
+    paper, paperMeta, generating, generatePaper, loadLatestPaper
+  } = useBankStore();
   const [difficulty, setDifficulty] = useState('中级');
   const [amount, setAmount] = useState(10);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -17,9 +20,16 @@ function App() {
 
   useEffect(() => {
     loadDashboard();
-  }, [loadDashboard]);
+    loadLatestPaper();
+  }, [loadDashboard, loadLatestPaper]);
 
-  const paper = useMemo(() => dashboard?.paper ?? [], [dashboard]);
+  const questions = useMemo(() => paper ?? dashboard?.paper ?? [], [paper, dashboard]);
+
+  async function handleGenerate() {
+    await generatePaper(difficulty, amount);
+    setAnswers({});
+    setReport([]);
+  }
 
   async function submitExam() {
     const result = await api.submitExam(answers);
@@ -63,11 +73,22 @@ function App() {
                       <Form.Item label="题量">
                         <Select value={amount} onChange={setAmount} options={[10, 20, 30, 50].map((value) => ({ value, label: `${value} 题` }))} />
                       </Form.Item>
-                      <Button icon={<ExperimentOutlined />} onClick={() => api.generatePaper(difficulty, amount)}>生成试卷</Button>
+                      <Button type="primary" icon={<ExperimentOutlined />} loading={generating} onClick={handleGenerate}>生成试卷</Button>
                     </Form>
 
+                    {paperMeta && (
+                      <Space wrap className="paper-meta">
+                        <Tag color="green">实际题数 {paperMeta.actual}/{paperMeta.requested}</Tag>
+                        <Tag color="blue">难度 {paperMeta.difficulty}</Tag>
+                        {paperMeta.reused > 0 && <Tag color="orange">题池不足，复用上份 {paperMeta.reused} 题</Tag>}
+                      </Space>
+                    )}
+                    {paperMeta?.shortage && (
+                      <Alert type="warning" message="题量缺口提示" description={paperMeta.shortage} showIcon className="block" />
+                    )}
+
                     <Space direction="vertical" size={16} className="question-list">
-                      {paper.map((question, index) => (
+                      {questions.map((question, index) => (
                         <Card key={question.id} size="small" className="question-card">
                           <Space wrap className="question-meta">
                             <Tag>{question.type}</Tag>

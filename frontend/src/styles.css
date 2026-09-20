@@ -63,6 +63,10 @@ body {
   margin-bottom: 16px;
 }
 
+.paper-meta {
+  margin-bottom: 12px;
+}
+
 .question-list {
   width: 100%;
 }

@@ -3,41 +3,12 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from bank.paper_service import paper_builder
+from bank.question_bank import QUESTION_BANK
 from bank.serializers import GeneratePaperSerializer, SubmitExamSerializer
 
 
-QUESTIONS = [
-    {
-        "id": 101,
-        "type": "数字推理",
-        "difficulty": "中级",
-        "stem": "2，6，12，20，30，下一项是多少？",
-        "options": ["38", "40", "42", "44"],
-        "answer": "42",
-        "explanation": "相邻差为 4、6、8、10，下一差为 12，因此答案为 42。",
-        "knowledge": "二级等差",
-    },
-    {
-        "id": 102,
-        "type": "逻辑判断",
-        "difficulty": "中级",
-        "stem": "所有通过高阶训练的人都完成错题复盘，小林完成高阶训练，可推出什么？",
-        "options": ["小林完成错题复盘", "小林没有错题", "小林排名第一", "无法判断"],
-        "answer": "小林完成错题复盘",
-        "explanation": "这是充分条件推理：完成高阶训练可以推出完成错题复盘。",
-        "knowledge": "充分条件",
-    },
-    {
-        "id": 103,
-        "type": "类比推理",
-        "difficulty": "初级",
-        "stem": "医生：诊断，相当于教师：？",
-        "options": ["备课", "授课", "批改", "讲解"],
-        "answer": "授课",
-        "explanation": "职业与核心工作行为对应，医生核心行为是诊断，教师核心行为是授课。",
-        "knowledge": "职业关系",
-    },
-]
+QUESTIONS = QUESTION_BANK
 
 
 def build_dashboard() -> dict:
@@ -57,7 +28,7 @@ def build_dashboard() -> dict:
             {"id": 4, "name": "类比推理", "accuracy": 84, "total": 210},
             {"id": 5, "name": "演绎推理", "accuracy": 80, "total": 210},
         ],
-        "paper": QUESTIONS,
+        "paper": QUESTIONS[:3],
         "wrongBook": [
             {"id": 1, "title": "集合包含关系反推", "type": "演绎推理", "mistakes": 5, "lastPracticed": "05-28"},
             {"id": 2, "title": "九宫格旋转规律", "type": "图形推理", "mistakes": 4, "lastPracticed": "05-27"},
@@ -92,9 +63,17 @@ def dashboard(_request):
 def generate_paper(request):
     serializer = GeneratePaperSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    difficulty = serializer.validated_data["difficulty"]
     amount = int(serializer.validated_data["amount"])
-    repeated = (QUESTIONS * ((amount // len(QUESTIONS)) + 1))[:amount]
-    return Response({"paper": repeated})
+    return Response(paper_builder.generate(difficulty, amount))
+
+
+@api_view(["GET"])
+def latest_paper(_request):
+    result = paper_builder.latest()
+    if result is None:
+        return Response({"paper": None})
+    return Response(result)
 
 
 @api_view(["POST"])

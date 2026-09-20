@@ -32,6 +32,15 @@ export interface WrongBookItem {
   lastPracticed: string;
 }
 
+export interface PaperResult {
+  paper: Question[];
+  difficulty: string;
+  requested: number;
+  actual: number;
+  reused: number;
+  shortage: string | null;
+}
+
 export interface Dashboard {
   profile: {
     nickname: string;
