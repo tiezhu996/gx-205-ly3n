@@ -16,6 +16,20 @@ export interface Question {
   knowledge: string;
 }
 
+export interface PaperResult {
+  difficulty: string;
+  requested_amount: number;
+  actual_amount: number;
+  gap_amount: number;
+  pool_amount: number;
+  notice: string;
+  has_gap: boolean;
+  generated_at: string;
+  seq?: number;
+  question_ids: number[];
+  paper: Question[];
+}
+
 export interface Ranking {
   rank: number;
   name: string;
@@ -46,4 +60,5 @@ export interface Dashboard {
   wrongBook: WrongBookItem[];
   rankings: Ranking[];
   radar: { axis: string; value: number }[];
+  poolAmounts?: Record<string, number>;
 }

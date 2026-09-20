@@ -8,22 +8,44 @@ import { useBankStore } from '@/store/useBankStore';
 const { Content } = Layout;
 const { Title, Paragraph, Text } = Typography;
 
+const DIFFICULTIES = ['入门', '初级', '中级', '高级', '专家'];
+const AMOUNTS = [10, 20, 30, 50];
+
 function App() {
-  const { dashboard, loading, error, loadDashboard, demoLogin } = useBankStore();
+  const {
+    dashboard, loading, paperLoading, error,
+    paper, answers, readback,
+    loadDashboard, demoLogin, generatePaper, restoreLastPaper, setAnswer
+  } = useBankStore();
   const [difficulty, setDifficulty] = useState('中级');
   const [amount, setAmount] = useState(10);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
   const [report, setReport] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     loadDashboard();
-  }, [loadDashboard]);
+    // 刷新后回读最近一次试卷（优先 localStorage，本地缺失时回退服务端）。
+    restoreLastPaper();
+  }, [loadDashboard, restoreLastPaper]);
 
-  const paper = useMemo(() => dashboard?.paper ?? [], [dashboard]);
+  // 页面默认展示仪表盘示例卷；一旦生成或回读到智能组卷，则以实际试卷为准。
+  const questions = useMemo(() => paper?.paper ?? dashboard?.paper ?? [], [paper, dashboard]);
+  const poolTotal = dashboard?.poolAmounts?.[difficulty];
 
   async function submitExam() {
-    const result = await api.submitExam(answers);
-    setReport([`得分 ${result.score}`, result.rank_hint, ...result.analysis]);
+    setSubmitting(true);
+    try {
+      const result = await api.submitExam(answers);
+      setReport([
+        `得分 ${result.score}（答对 ${result.correct}/${result.total} 题）`,
+        result.rank_hint,
+        ...result.analysis
+      ]);
+    } catch (submitError) {
+      setReport([submitError instanceof Error ? submitError.message : '提交失败']);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -55,27 +77,72 @@ function App() {
 
               <Row gutter={[16, 16]} className="block">
                 <Col xs={24} lg={15}>
-                  <Card title="智能组卷练习" extra={<Tag color="green">限时考试可扩展</Tag>}>
+                  <Card title="智能组卷练习" extra={<Tag color="green">同卷题目不重复</Tag>}>
                     <Form layout="inline" className="paper-form">
                       <Form.Item label="难度">
-                        <Select value={difficulty} onChange={setDifficulty} options={['入门', '初级', '中级', '高级', '专家'].map((value) => ({ value, label: value }))} />
+                        <Select
+                          value={difficulty}
+                          onChange={setDifficulty}
+                          options={DIFFICULTIES.map((value) => ({
+                            value,
+                            label: dashboard.poolAmounts?.[value]
+                              ? `${value}（题池 ${dashboard.poolAmounts[value]} 题）`
+                              : value
+                          }))}
+                        />
                       </Form.Item>
                       <Form.Item label="题量">
-                        <Select value={amount} onChange={setAmount} options={[10, 20, 30, 50].map((value) => ({ value, label: `${value} 题` }))} />
+                        <Select value={amount} onChange={setAmount} options={AMOUNTS.map((value) => ({ value, label: `${value} 题` }))} />
                       </Form.Item>
-                      <Button icon={<ExperimentOutlined />} onClick={() => api.generatePaper(difficulty, amount)}>生成试卷</Button>
+                      <Button
+                        type="primary"
+                        icon={<ExperimentOutlined />}
+                        loading={paperLoading}
+                        onClick={() => generatePaper(difficulty, amount)}
+                      >
+                        生成试卷
+                      </Button>
                     </Form>
+                    {typeof poolTotal === 'number' && amount > poolTotal && (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        className="block"
+                        message={`当前难度题池仅 ${poolTotal} 题，生成时将实际下发 ${poolTotal} 题，存在 ${amount - poolTotal} 题缺口（不会补重复题）。`}
+                      />
+                    )}
+
+                    {paper && (
+                      <Space direction="vertical" size={8} className="block">
+                        <Space wrap>
+                          <Tag color="blue">难度：{paper.difficulty}</Tag>
+                          <Tag color={paper.has_gap ? 'red' : 'green'}>
+                            实际题数 {paper.actual_amount} / 请求 {paper.requested_amount}
+                          </Tag>
+                          {paper.has_gap && <Tag color="red">缺口 {paper.gap_amount} 题</Tag>}
+                          <Tag>题池 {paper.pool_amount} 题</Tag>
+                          {readback && <Tag color="purple">最近一次试卷（已回读）</Tag>}
+                        </Space>
+                        {paper.notice && (
+                          <Alert
+                            type={paper.has_gap ? 'warning' : 'info'}
+                            showIcon
+                            message={paper.notice}
+                          />
+                        )}
+                      </Space>
+                    )}
 
                     <Space direction="vertical" size={16} className="question-list">
-                      {paper.map((question, index) => (
-                        <Card key={question.id} size="small" className="question-card">
+                      {questions.map((question, index) => (
+                        <Card key={`${question.id}-${index}`} size="small" className="question-card">
                           <Space wrap className="question-meta">
                             <Tag>{question.type}</Tag>
                             <Tag color="blue">{question.difficulty}</Tag>
                             <Tag color="gold">{question.knowledge}</Tag>
                           </Space>
                           <Title level={5}>{index + 1}. {question.stem}</Title>
-                          <Radio.Group value={answers[question.id]} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}>
+                          <Radio.Group value={answers[question.id]} onChange={(event) => setAnswer(question.id, event.target.value)}>
                             <Space direction="vertical">
                               {question.options.map((option) => <Radio key={option} value={option}>{option}</Radio>)}
                             </Space>
@@ -84,7 +151,15 @@ function App() {
                         </Card>
                       ))}
                     </Space>
-                    <Button type="primary" className="submit" onClick={submitExam}>提交并生成报告</Button>
+                    <Button
+                      type="primary"
+                      className="submit"
+                      disabled={questions.length === 0}
+                      loading={submitting}
+                      onClick={submitExam}
+                    >
+                      提交并生成报告
+                    </Button>
                     {report.length > 0 && <Alert type="success" message="考试报告" description={report.join('；')} showIcon className="block" />}
                   </Card>
                 </Col>

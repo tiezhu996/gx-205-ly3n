@@ -3,41 +3,12 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from bank.serializers import GeneratePaperSerializer, SubmitExamSerializer
+from bank.paper_service import generate_paper, get_last_paper, grade_paper
+from bank.questions import QUESTIONS_BY_ID, QUESTION_BANK
+from bank.serializers import GeneratePaperSerializer, LatestPaperSerializer, SubmitExamSerializer
 
-
-QUESTIONS = [
-    {
-        "id": 101,
-        "type": "数字推理",
-        "difficulty": "中级",
-        "stem": "2，6，12，20，30，下一项是多少？",
-        "options": ["38", "40", "42", "44"],
-        "answer": "42",
-        "explanation": "相邻差为 4、6、8、10，下一差为 12，因此答案为 42。",
-        "knowledge": "二级等差",
-    },
-    {
-        "id": 102,
-        "type": "逻辑判断",
-        "difficulty": "中级",
-        "stem": "所有通过高阶训练的人都完成错题复盘，小林完成高阶训练，可推出什么？",
-        "options": ["小林完成错题复盘", "小林没有错题", "小林排名第一", "无法判断"],
-        "answer": "小林完成错题复盘",
-        "explanation": "这是充分条件推理：完成高阶训练可以推出完成错题复盘。",
-        "knowledge": "充分条件",
-    },
-    {
-        "id": 103,
-        "type": "类比推理",
-        "difficulty": "初级",
-        "stem": "医生：诊断，相当于教师：？",
-        "options": ["备课", "授课", "批改", "讲解"],
-        "answer": "授课",
-        "explanation": "职业与核心工作行为对应，医生核心行为是诊断，教师核心行为是授课。",
-        "knowledge": "职业关系",
-    },
-]
+# 仪表盘沿用示例数据中的三道题，均来自真实题池，保证页面开箱即有内容。
+DASHBOARD_SAMPLE_IDS = [101, 302, 203]
 
 
 def build_dashboard() -> dict:
@@ -57,7 +28,7 @@ def build_dashboard() -> dict:
             {"id": 4, "name": "类比推理", "accuracy": 84, "total": 210},
             {"id": 5, "name": "演绎推理", "accuracy": 80, "total": 210},
         ],
-        "paper": QUESTIONS,
+        "paper": [QUESTIONS_BY_ID[qid] for qid in DASHBOARD_SAMPLE_IDS],
         "wrongBook": [
             {"id": 1, "title": "集合包含关系反推", "type": "演绎推理", "mistakes": 5, "lastPracticed": "05-28"},
             {"id": 2, "title": "九宫格旋转规律", "type": "图形推理", "mistakes": 4, "lastPracticed": "05-27"},
@@ -75,6 +46,9 @@ def build_dashboard() -> dict:
             {"axis": "类比", "value": 84},
             {"axis": "演绎", "value": 80},
         ],
+        # 各难度可用题量，前端可据此提示题池规模。
+        "poolAmounts": {difficulty: sum(1 for q in QUESTION_BANK if q["difficulty"] == difficulty)
+                        for difficulty in ["入门", "初级", "中级", "高级", "专家"]},
     }
 
 
@@ -89,24 +63,40 @@ def dashboard(_request):
 
 
 @api_view(["POST"])
-def generate_paper(request):
+def generate_paper_view(request):
+    """智能组卷：同卷题目不重复，题池不足时返回实际题数和缺口原因。"""
     serializer = GeneratePaperSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    difficulty = serializer.validated_data["difficulty"]
     amount = int(serializer.validated_data["amount"])
-    repeated = (QUESTIONS * ((amount // len(QUESTIONS)) + 1))[:amount]
-    return Response({"paper": repeated})
+    return Response(generate_paper(difficulty, amount))
+
+
+@api_view(["GET"])
+def latest_paper_view(request):
+    """回读最近一次组卷结果，供页面刷新后恢复试卷、实际题数与缺口提示。"""
+    serializer = LatestPaperSerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    result = get_last_paper(serializer.validated_data.get("difficulty"))
+    if result is None:
+        return Response({"paper": [], "actual_amount": 0, "notice": "暂无最近一次组卷记录。", "has_gap": False})
+    return Response(result)
 
 
 @api_view(["POST"])
 def submit_exam(request):
+    """按最近一次实际生成的试卷判分，原有提交入口保持可用。"""
     serializer = SubmitExamSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    answers = serializer.validated_data.get("answers", {})
-    correct = sum(1 for question in QUESTIONS if answers.get(str(question["id"])) == question["answer"])
-    score = round(correct / len(QUESTIONS) * 100)
+    answers = serializer.validated_data.get("answers", {}) or {}
+    latest = get_last_paper()
+    question_ids = latest["question_ids"] if latest else []
+    grade = grade_paper(question_ids, answers)
     return Response(
         {
-            "score": score,
+            "score": grade["score"],
+            "correct": grade["correct"],
+            "total": grade["total"],
             "rank_hint": "本次表现接近黄金 I，继续强化图形推理可冲击铂金。",
             "analysis": ["数字推理稳定", "图形旋转规律仍需复盘", "演绎推理建议练习充分必要条件"],
         }
